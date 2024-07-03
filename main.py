@@ -1,9 +1,10 @@
 import asyncio
 import websockets
 import json
-from sklearn.linear_model import LinearRegression
-from sklearn.preprocessing import StandardScaler
 import numpy as np
+import pandas as pd
+import tensorflow as tf
+from sklearn.preprocessing import StandardScaler
 
 app_id = 1089
 connection_url = f'wss://ws.derivws.com/websockets/v3?app_id={app_id}'
@@ -47,8 +48,13 @@ async def subscribe_ticks():
                 yield data['tick']
 
 
-def create_model():
-    model = LinearRegression()
+def create_lstm_model(input_shape):
+    model = tf.keras.Sequential()
+    model.add(tf.keras.layers.LSTM(
+        units=50, return_sequences=True, input_shape=input_shape))
+    model.add(tf.keras.layers.LSTM(units=50))
+    model.add(tf.keras.layers.Dense(1))
+    model.compile(optimizer='adam', loss='mean_squared_error')
     return model
 
 
@@ -60,7 +66,9 @@ def preprocess_data(prices):
     for i in range(60, len(prices_scaled)):
         X_train.append(prices_scaled[i-60:i, 0])
         y_train.append(prices_scaled[i, 0])
-    return np.array(X_train), np.array(y_train), scaler
+    X_train = np.array(X_train)
+    y_train = np.array(y_train)
+    return X_train.reshape(X_train.shape[0], X_train.shape[1], 1), y_train, scaler
 
 
 async def main():
@@ -70,9 +78,9 @@ async def main():
     # Preprocess the data
     X_train, y_train, scaler = preprocess_data(prices)
 
-    # Create and train the model
-    model = create_model()
-    model.fit(X_train, y_train)
+    # Create and train the LSTM model
+    model = create_lstm_model((X_train.shape[1], 1))
+    model.fit(X_train, y_train, epochs=20, batch_size=32)
 
     window_size = 1000  # Define the window size for retraining
     retrain_interval = 100  # Define how often to retrain the model
@@ -89,7 +97,7 @@ async def main():
             prices = prices[-window_size:]
 
         latest_prices_scaled = scaler.transform(prices[-60:])
-        latest_input = latest_prices_scaled.reshape(1, -1)
+        latest_input = latest_prices_scaled.reshape(1, 60, 1)
 
         # Make prediction
         prediction_scaled = model.predict(latest_input)
@@ -101,8 +109,8 @@ async def main():
         if tick_count % retrain_interval == 0:
             # Retrain the model with the updated prices
             X_train, y_train, scaler = preprocess_data(prices)
-            model = create_model()
-            model.fit(X_train, y_train)
+            model = create_lstm_model((X_train.shape[1], 1))
+            model.fit(X_train, y_train, epochs=10, batch_size=32)
 
 if __name__ == "__main__":
     asyncio.run(main())
