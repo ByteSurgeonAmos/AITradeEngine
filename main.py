@@ -160,48 +160,73 @@ async def main():
     predictions = deque(maxlen=100)  # Store last 100 predictions
     actuals = deque(maxlen=100)  # Store last 100 actual prices
 
-    async for tick in subscribe_ticks():
-        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')
-        latest_price = float(tick['quote'])
+    while True:
+        try:
+            async for tick in subscribe_ticks():
+                timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')
+                latest_price = float(tick['quote'])
 
-        # Save tick data to CSV
-        save_to_csv([timestamp, latest_price])
+                # Save tick data to CSV
+                save_to_csv([timestamp, latest_price])
 
-        # Make prediction for the next tick
-        input_data = np.array(list(prices)).reshape(-1, 1)
-        input_scaled = scaler.transform(input_data)
-        input_reshaped = tf.keras.preprocessing.sequence.pad_sequences(
-            [input_scaled], maxlen=60, dtype='float32')
+                # Make prediction for the next tick
+                input_data = np.array(list(prices)).reshape(-1, 1)
+                input_scaled = scaler.transform(input_data)
+                input_reshaped = tf.keras.preprocessing.sequence.pad_sequences(
+                    [input_scaled], maxlen=60, dtype='float32')
 
-        prediction_scaled = model.predict(input_reshaped)
-        prediction = scaler.inverse_transform(prediction_scaled)[0][0]
+                prediction_scaled = model.predict(input_reshaped)
+                prediction = scaler.inverse_transform(prediction_scaled)[0][0]
 
-        print(f"Current price: {latest_price}")
-        print(f"Predicted price for next tick: {prediction}")
+                print(f"Current price: {latest_price}")
+                print(f"Predicted price for next tick: {prediction}")
 
-        # Store prediction and actual price
-        predictions.append(prediction)
-        actuals.append(latest_price)
+                # Store prediction and actual price
+                predictions.append(prediction)
+                actuals.append(latest_price)
 
-        # Calculate and report accuracy
-        if len(predictions) >= 10:  # Start reporting after 10 predictions
-            accuracy = calculate_accuracy(
-                list(predictions)[:-1], list(actuals)[1:])
-            print(f"Current accuracy (last {
-                  len(predictions)-1} predictions): {accuracy:.2%}")
+                # Calculate and report accuracy
+                if len(predictions) >= 10:  # Start reporting after 10 predictions
+                    accuracy = calculate_accuracy(
+                        list(predictions)[:-1], list(actuals)[1:])
+                    print(f"Current accuracy (last {
+                          len(predictions)-1} predictions): {accuracy:.2%}")
 
-        prices.append(latest_price)
+                    # Conditional retraining based on accuracy
+                    if accuracy >= 0.8:  # If accuracy is 80% or more
+                        retrain_interval = 50  # Retrain more frequently
+                    else:
+                        retrain_interval = 100  # Default retrain interval
 
-        tick_count += 1
-        if tick_count % retrain_interval == 0:
-            X_train, y_train, scaler = preprocess_data(
-                np.array(list(prices)).reshape(-1, 1))
-            # Recreate the model with the same architecture
-            model = create_lstm_model((X_train.shape[1], 1))
-            model.fit(X_train, y_train, epochs=10, batch_size=32)
+                prices.append(latest_price)
 
-        if tick_count % save_interval == 0:
-            save_model(model, scaler)
+                tick_count += 1
+                if tick_count % retrain_interval == 0:
+                    X_train, y_train, scaler = preprocess_data(
+                        np.array(list(prices)).reshape(-1, 1))
+                    # Recreate the model with the same architecture
+                    model = create_lstm_model((X_train.shape[1], 1))
+                    model.fit(X_train, y_train, epochs=10, batch_size=32)
+
+                if tick_count % save_interval == 0:
+                    save_model(model, scaler)
+
+        except (websockets.ConnectionClosed, ConnectionError) as e:
+            print(f"Connection error: {e}. Switching to offline mode.")
+
+            # Perform offline prediction
+            historical_prices = load_csv_data()
+            if len(historical_prices) > 60:
+                X_train, _, scaler = preprocess_data(historical_prices)
+                predictions = offline_prediction(
+                    model, scaler, historical_prices)
+
+                for prediction, actual in predictions:
+                    print(f"Offline prediction: {
+                          prediction}, Actual price: {actual}")
+
+            # Wait before trying to reconnect
+            await asyncio.sleep(10)  # Wait for 10 seconds before retrying
 
 
 def calculate_accuracy(predictions, actuals, threshold=0.0001):
