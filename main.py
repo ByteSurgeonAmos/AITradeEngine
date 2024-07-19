@@ -69,8 +69,10 @@ def preprocess_data(prices):
     X_train = []
     y_train = []
     for i in range(65, len(prices_scaled)):
-        X_train.append(prices_scaled[i-65:i-5, 0])
+        X_train.append(prices_scaled[:i, 0])
         y_train.append(prices_scaled[i, 0])
+    X_train = tf.keras.preprocessing.sequence.pad_sequences(
+        X_train, maxlen=60, dtype='float32')
     X_train = np.array(X_train)
     y_train = np.array(y_train)
     return X_train.reshape(X_train.shape[0], X_train.shape[1], 1), y_train, scaler
@@ -94,9 +96,10 @@ def offline_prediction(model, scaler, data):
     window_size = 60
     predictions = []
     for i in range(len(data) - window_size - 5):
-        input_data = data[i:i+window_size]
+        input_data = data[:i+window_size]
         input_scaled = scaler.transform(input_data)
-        input_reshaped = input_scaled.reshape(1, window_size, 1)
+        input_reshaped = tf.keras.preprocessing.sequence.pad_sequences(
+            [input_scaled], maxlen=60, dtype='float32')
         prediction_scaled = model.predict(input_reshaped)
         prediction = scaler.inverse_transform(prediction_scaled)[0][0]
         actual_price = data[i+window_size+5][0]
@@ -165,9 +168,10 @@ async def main():
         save_to_csv([timestamp, latest_price])
 
         # Make prediction for the next tick
-        input_data = np.array(list(prices)[-60:]).reshape(-1, 1)
+        input_data = np.array(list(prices)).reshape(-1, 1)
         input_scaled = scaler.transform(input_data)
-        input_reshaped = input_scaled.reshape(1, 60, 1)
+        input_reshaped = tf.keras.preprocessing.sequence.pad_sequences(
+            [input_scaled], maxlen=60, dtype='float32')
 
         prediction_scaled = model.predict(input_reshaped)
         prediction = scaler.inverse_transform(prediction_scaled)[0][0]
@@ -192,6 +196,8 @@ async def main():
         if tick_count % retrain_interval == 0:
             X_train, y_train, scaler = preprocess_data(
                 np.array(list(prices)).reshape(-1, 1))
+            # Recreate the model with the same architecture
+            model = create_lstm_model((X_train.shape[1], 1))
             model.fit(X_train, y_train, epochs=10, batch_size=32)
 
         if tick_count % save_interval == 0:
