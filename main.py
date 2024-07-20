@@ -146,6 +146,7 @@ async def main():
         model.fit(X_train, y_train, epochs=20, batch_size=32)
         save_model(model, scaler)
     else:
+        model.compile(optimizer='adam', loss='mean_squared_error')
         historical_prices = await get_ticks_history()
         historical_prices = np.array(
             [float(price) for price in historical_prices]).reshape(-1, 1)
@@ -189,8 +190,7 @@ async def main():
                 if len(predictions) >= 10:  # Start reporting after 10 predictions
                     accuracy = calculate_accuracy(
                         list(predictions)[:-1], list(actuals)[1:])
-                    print(f"Current accuracy (last {
-                          len(predictions)-1} predictions): {accuracy:.2%}")
+                    print(f"Current accuracy (last {len(predictions)-1} predictions): {accuracy:.2%}")
 
                     # Conditional retraining based on accuracy
                     if accuracy >= 0.8:  # If accuracy is 80% or more
@@ -218,22 +218,17 @@ async def main():
             historical_prices = load_csv_data()
             if len(historical_prices) > 60:
                 X_train, _, scaler = preprocess_data(historical_prices)
-                predictions = offline_prediction(
-                    model, scaler, historical_prices)
+                predictions = offline_prediction(model, scaler, historical_prices)
 
                 for prediction, actual in predictions:
-                    print(f"Offline prediction: {
-                          prediction}, Actual price: {actual}")
+                    print(f"Offline prediction: {prediction}, Actual price: {actual}")
 
             # Wait before trying to reconnect
             await asyncio.sleep(10)  # Wait for 10 seconds before retrying
 
-
 def calculate_accuracy(predictions, actuals, threshold=0.0001):
-    correct = sum(abs(pred - act) <= threshold for pred,
-                  act in zip(predictions, actuals))
+    correct = sum(abs(pred - act) <= threshold for pred, act in zip(predictions, actuals))
     return correct / len(predictions) if predictions else 0
-
 
 if __name__ == "__main__":
     asyncio.run(main())
