@@ -10,6 +10,7 @@ import os
 from datetime import datetime
 import pickle
 import csv
+import logging
 
 app_id = 1089
 connection_url = f'wss://ws.derivws.com/websockets/v3?app_id={app_id}'
@@ -28,6 +29,7 @@ ticks_request = {
     "subscribe": 1,
 }
 
+logging.basicConfig(level=logging.DEBUG)
 
 async def get_ticks_history():
     async with websockets.connect(connection_url) as websocket:
@@ -35,10 +37,9 @@ async def get_ticks_history():
         response = await websocket.recv()
         data = json.loads(response)
         if 'error' in data:
-            print(f"Error: {data['error']['message']}")
+            logging.error(f"Error: {data['error']['message']}")
         else:
             return data['history']['prices']
-
 
 async def subscribe_ticks():
     async with websockets.connect(connection_url) as websocket:
@@ -47,11 +48,10 @@ async def subscribe_ticks():
             response = await websocket.recv()
             data = json.loads(response)
             if 'error' in data:
-                print(f"Error: {data['error']['message']}")
+                logging.error(f"Error: {data['error']['message']}")
                 break
             elif data['msg_type'] == 'tick':
                 yield data['tick']
-
 
 def create_lstm_model(input_shape):
     model = tf.keras.Sequential()
@@ -61,7 +61,6 @@ def create_lstm_model(input_shape):
     model.add(tf.keras.layers.Dense(1))
     model.compile(optimizer='adam', loss='mean_squared_error')
     return model
-
 
 def preprocess_data(prices):
     scaler = StandardScaler()
@@ -77,7 +76,6 @@ def preprocess_data(prices):
     y_train = np.array(y_train)
     return X_train.reshape(X_train.shape[0], X_train.shape[1], 1), y_train, scaler
 
-
 def save_to_csv(data, filename='tick_data.csv'):
     file_exists = os.path.isfile(filename)
     with open(filename, 'a', newline='') as csvfile:
@@ -86,11 +84,9 @@ def save_to_csv(data, filename='tick_data.csv'):
             writer.writerow(['timestamp', 'price'])
         writer.writerow(data)
 
-
 def load_csv_data(filename='tick_data.csv'):
     df = pd.read_csv(filename)
     return df['price'].values.reshape(-1, 1)
-
 
 def offline_prediction(model, scaler, data):
     window_size = 60
@@ -106,17 +102,15 @@ def offline_prediction(model, scaler, data):
         predictions.append((prediction, actual_price))
     return predictions
 
-
 def save_model(model, scaler, filename_prefix='lstm_model'):
     model_filename = f"{filename_prefix}.h5"
     model.save(model_filename)
-    print(f"Model saved as {model_filename}")
+    logging.info(f"Model saved as {model_filename}")
 
     scaler_filename = f"{filename_prefix}_scaler.pkl"
     with open(scaler_filename, 'wb') as f:
         pickle.dump(scaler, f)
-    print(f"Scaler saved as {scaler_filename}")
-
+    logging.info(f"Scaler saved as {scaler_filename}")
 
 def load_latest_model(filename_prefix='lstm_model'):
     model_filename = f"{filename_prefix}.h5"
@@ -124,14 +118,17 @@ def load_latest_model(filename_prefix='lstm_model'):
 
     if os.path.exists(model_filename) and os.path.exists(scaler_filename):
         model = tf.keras.models.load_model(model_filename)
-        print(f"Loaded model from {model_filename}")
+        logging.info(f"Loaded model from {model_filename}")
         with open(scaler_filename, 'rb') as f:
             scaler = pickle.load(f)
-        print(f"Loaded scaler from {scaler_filename}")
+        logging.info(f"Loaded scaler from {scaler_filename}")
         return model, scaler
     else:
         return None, None
 
+def calculate_accuracy(predictions, actuals, threshold=0.0001):
+    correct = sum(abs(pred - act) <= threshold for pred, act in zip(predictions, actuals))
+    return correct / len(predictions) if predictions else 0
 
 async def main():
     model, scaler = load_latest_model()
@@ -146,6 +143,7 @@ async def main():
         model.fit(X_train, y_train, epochs=20, batch_size=32)
         save_model(model, scaler)
     else:
+        model.compile(optimizer='adam', loss='mean_squared_error')
         historical_prices = await get_ticks_history()
         historical_prices = np.array(
             [float(price) for price in historical_prices]).reshape(-1, 1)
@@ -175,11 +173,13 @@ async def main():
                 input_reshaped = tf.keras.preprocessing.sequence.pad_sequences(
                     [input_scaled], maxlen=60, dtype='float32')
 
+                logging.debug(f"Input reshaped for prediction: {input_reshaped.shape}")
+
                 prediction_scaled = model.predict(input_reshaped)
                 prediction = scaler.inverse_transform(prediction_scaled)[0][0]
 
-                print(f"Current price: {latest_price}")
-                print(f"Predicted price for next tick: {prediction}")
+                logging.debug(f"Current price: {latest_price}")
+                logging.debug(f"Predicted price for next tick: {prediction}")
 
                 # Store prediction and actual price
                 predictions.append(prediction)
@@ -189,8 +189,7 @@ async def main():
                 if len(predictions) >= 10:  # Start reporting after 10 predictions
                     accuracy = calculate_accuracy(
                         list(predictions)[:-1], list(actuals)[1:])
-                    print(f"Current accuracy (last {
-                          len(predictions)-1} predictions): {accuracy:.2%}")
+                    logging.info(f"Current accuracy (last {len(predictions)-1} predictions): {accuracy:.2%}")
 
                     # Conditional retraining based on accuracy
                     if accuracy >= 0.8:  # If accuracy is 80% or more
@@ -212,28 +211,19 @@ async def main():
                     save_model(model, scaler)
 
         except (websockets.ConnectionClosed, ConnectionError) as e:
-            print(f"Connection error: {e}. Switching to offline mode.")
+            logging.error(f"Connection error: {e}. Switching to offline mode.")
 
             # Perform offline prediction
             historical_prices = load_csv_data()
             if len(historical_prices) > 60:
                 X_train, _, scaler = preprocess_data(historical_prices)
-                predictions = offline_prediction(
-                    model, scaler, historical_prices)
+                predictions = offline_prediction(model, scaler, historical_prices)
 
                 for prediction, actual in predictions:
-                    print(f"Offline prediction: {
-                          prediction}, Actual price: {actual}")
+                    logging.info(f"Offline prediction: {prediction}, Actual price: {actual}")
 
             # Wait before trying to reconnect
             await asyncio.sleep(10)  # Wait for 10 seconds before retrying
-
-
-def calculate_accuracy(predictions, actuals, threshold=0.0001):
-    correct = sum(abs(pred - act) <= threshold for pred,
-                  act in zip(predictions, actuals))
-    return correct / len(predictions) if predictions else 0
-
 
 if __name__ == "__main__":
     asyncio.run(main())
