@@ -205,8 +205,7 @@ async def main():
                     if len(predictions) >= 10:  # Start reporting after 10 predictions
                         accuracy = calculate_accuracy(
                             list(predictions)[:-1], list(actuals)[1:])
-                        logging.info(f"Current accuracy (last {
-                                     len(predictions)-1} predictions): {accuracy:.2%}")
+                        logging.info(f"Current accuracy (last {len(predictions)-1} predictions): {accuracy:.2%}")
 
                         # Conditional retraining based on accuracy
                         if accuracy >= 0.8:  # If accuracy is 80% or more
@@ -236,8 +235,7 @@ async def main():
                     model, scaler, historical_prices)
 
                 for prediction, actual in predictions:
-                    logging.info(f"Offline prediction: {
-                                 prediction}, Actual price: {actual}")
+                    logging.info(f"Offline prediction: {prediction}, Actual price: {actual}")
 
             # Wait before trying to reconnect
             await asyncio.sleep(10)  # Wait for 10 seconds before retrying
