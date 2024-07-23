@@ -57,11 +57,12 @@ async def subscribe_ticks():
 
 
 def create_lstm_model(input_shape):
-    model = tf.keras.Sequential()
-    model.add(tf.keras.layers.LSTM(
-        units=50, return_sequences=True, input_shape=input_shape))
-    model.add(tf.keras.layers.LSTM(units=50))
-    model.add(tf.keras.layers.Dense(1))
+    model = tf.keras.Sequential([
+        tf.keras.layers.LSTM(units=50, return_sequences=True,
+                             input_shape=input_shape),
+        tf.keras.layers.LSTM(units=50),
+        tf.keras.layers.Dense(1)
+    ])
     model.compile(optimizer='adam', loss='mean_squared_error')
     return model
 
@@ -72,13 +73,11 @@ def preprocess_data(prices):
     X_train = []
     y_train = []
     for i in range(65, len(prices_scaled)):
-        X_train.append(prices_scaled[:i, 0])
+        X_train.append(prices_scaled[i-65:i, 0])
         y_train.append(prices_scaled[i, 0])
-    X_train = tf.keras.preprocessing.sequence.pad_sequences(
-        X_train, maxlen=60, dtype='float32')
-    X_train = np.array(X_train)
+    X_train = np.array(X_train).reshape(-1, 65, 1)
     y_train = np.array(y_train)
-    return X_train.reshape(X_train.shape[0], X_train.shape[1], 1), y_train, scaler
+    return X_train, y_train, scaler
 
 
 def save_to_csv(data, filename='tick_data.csv'):
@@ -99,10 +98,9 @@ def offline_prediction(model, scaler, data):
     window_size = 60
     predictions = []
     for i in range(len(data) - window_size - 5):
-        input_data = data[:i+window_size]
+        input_data = data[i:i+window_size]
         input_scaled = scaler.transform(input_data)
-        input_reshaped = tf.keras.preprocessing.sequence.pad_sequences(
-            [input_scaled], maxlen=60, dtype='float32')
+        input_reshaped = np.array([input_scaled]).reshape(-1, 60, 1)
         prediction_scaled = model.predict(input_reshaped)
         prediction = scaler.inverse_transform(prediction_scaled)[0][0]
         actual_price = data[i+window_size+5][0]
@@ -180,38 +178,41 @@ async def main():
                 save_to_csv([timestamp, latest_price])
 
                 # Make prediction for the next tick
+                prices.append(latest_price)
                 input_data = np.array(list(prices)).reshape(-1, 1)
                 input_scaled = scaler.transform(input_data)
-                input_reshaped = tf.keras.preprocessing.sequence.pad_sequences(
-                    [input_scaled], maxlen=60, dtype='float32')
 
-                logging.debug(f"Input reshaped for prediction: {
-                              input_reshaped.shape}")
+                if len(input_scaled) >= 60:
+                    input_reshaped = np.array(
+                        [input_scaled[-60:]]).reshape(-1, 60, 1)
 
-                prediction_scaled = model.predict(input_reshaped)
-                prediction = scaler.inverse_transform(prediction_scaled)[0][0]
+                    logging.debug(f"Input reshaped for prediction: {
+                                  input_reshaped.shape}")
 
-                logging.debug(f"Current price: {latest_price}")
-                logging.debug(f"Predicted price for next tick: {prediction}")
+                    prediction_scaled = model.predict(input_reshaped)
+                    prediction = scaler.inverse_transform(
+                        prediction_scaled)[0][0]
 
-                # Store prediction and actual price
-                predictions.append(prediction)
-                actuals.append(latest_price)
+                    logging.debug(f"Current price: {latest_price}")
+                    logging.debug(
+                        f"Predicted price for next tick: {prediction}")
 
-                # Calculate and report accuracy
-                if len(predictions) >= 10:  # Start reporting after 10 predictions
-                    accuracy = calculate_accuracy(
-                        list(predictions)[:-1], list(actuals)[1:])
-                    logging.info(f"Current accuracy (last {
-                                 len(predictions)-1} predictions): {accuracy:.2%}")
+                    # Store prediction and actual price
+                    predictions.append(prediction)
+                    actuals.append(latest_price)
 
-                    # Conditional retraining based on accuracy
-                    if accuracy >= 0.8:  # If accuracy is 80% or more
-                        retrain_interval = 50  # Retrain more frequently
-                    else:
-                        retrain_interval = 100  # Default retrain interval
+                    # Calculate and report accuracy
+                    if len(predictions) >= 10:  # Start reporting after 10 predictions
+                        accuracy = calculate_accuracy(
+                            list(predictions)[:-1], list(actuals)[1:])
+                        logging.info(f"Current accuracy (last {
+                                     len(predictions)-1} predictions): {accuracy:.2%}")
 
-                prices.append(latest_price)
+                        # Conditional retraining based on accuracy
+                        if accuracy >= 0.8:  # If accuracy is 80% or more
+                            retrain_interval = 50  # Retrain more frequently
+                        else:
+                            retrain_interval = 100  # Default retrain interval
 
                 tick_count += 1
                 if tick_count % retrain_interval == 0:
@@ -243,3 +244,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
