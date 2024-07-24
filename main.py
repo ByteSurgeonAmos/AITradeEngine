@@ -1,16 +1,18 @@
-import asyncio
-import websockets
-import json
-import numpy as np
-import pandas as pd
-import tensorflow as tf
-from sklearn.preprocessing import StandardScaler
-from collections import deque
-import os
-from datetime import datetime
-import pickle
-import csv
 import logging
+import csv
+import pickle
+from datetime import datetime
+from collections import deque
+from sklearn.preprocessing import StandardScaler
+import tensorflow as tf
+import pandas as pd
+import numpy as np
+import json
+import websockets
+import asyncio
+import os
+os.environ['CUDA_VISIBLE_DEVICES'] = '-1'  # Disable GPU usage
+
 
 app_id = 1089
 connection_url = f'wss://ws.derivws.com/websockets/v3?app_id={app_id}'
@@ -63,6 +65,12 @@ def create_lstm_model(input_shape):
         tf.keras.layers.LSTM(units=50),
         tf.keras.layers.Dense(1)
     ])
+    model = tf.keras.Sequential([
+        tf.keras.layers.LSTM(units=50, return_sequences=True,
+                             input_shape=input_shape),
+        tf.keras.layers.LSTM(units=50),
+        tf.keras.layers.Dense(1)
+    ])
     model.compile(optimizer='adam', loss='mean_squared_error')
     return model
 
@@ -74,9 +82,12 @@ def preprocess_data(prices):
     y_train = []
     for i in range(65, len(prices_scaled)):
         X_train.append(prices_scaled[i-65:i, 0])
+        X_train.append(prices_scaled[i-65:i, 0])
         y_train.append(prices_scaled[i, 0])
     X_train = np.array(X_train).reshape(-1, 65, 1)
+    X_train = np.array(X_train).reshape(-1, 65, 1)
     y_train = np.array(y_train)
+    return X_train, y_train, scaler
     return X_train, y_train, scaler
 
 
@@ -99,7 +110,9 @@ def offline_prediction(model, scaler, data):
     predictions = []
     for i in range(len(data) - window_size - 5):
         input_data = data[i:i+window_size]
+        input_data = data[i:i+window_size]
         input_scaled = scaler.transform(input_data)
+        input_reshaped = np.array([input_scaled]).reshape(-1, 60, 1)
         input_reshaped = np.array([input_scaled]).reshape(-1, 60, 1)
         prediction_scaled = model.predict(input_reshaped)
         prediction = scaler.inverse_transform(prediction_scaled)[0][0]
@@ -179,6 +192,7 @@ async def main():
 
                 # Make prediction for the next tick
                 prices.append(latest_price)
+                prices.append(latest_price)
                 input_data = np.array(list(prices)).reshape(-1, 1)
                 input_scaled = scaler.transform(input_data)
 
@@ -186,17 +200,28 @@ async def main():
                     input_reshaped = np.array(
                         [input_scaled[-60:]]).reshape(-1, 60, 1)
 
-                    logging.debug(f"Input reshaped for prediction: {
-                                  input_reshaped.shape}")
+                if len(input_scaled) >= 60:
+                    input_reshaped = np.array(
+                        [input_scaled[-60:]]).reshape(-1, 60, 1)
 
+                    logging.debug(f"Input reshaped for prediction: {input_reshaped.shape}")
+                    logging.debug(f"Input reshaped for prediction: {input_reshaped.shape}")
+
+                    prediction_scaled = model.predict(input_reshaped)
+                    prediction = scaler.inverse_transform(
+                        prediction_scaled)[0][0]
                     prediction_scaled = model.predict(input_reshaped)
                     prediction = scaler.inverse_transform(
                         prediction_scaled)[0][0]
 
                     logging.debug(f"Current price: {latest_price}")
-                    logging.debug(
-                        f"Predicted price for next tick: {prediction}")
+                    logging.debug(f"Predicted price for next tick: {prediction}")
+                    logging.debug(f"Current price: {latest_price}")
+                    logging.debug(f"Predicted price for next tick: {prediction}")
 
+                    # Store prediction and actual price
+                    predictions.append(prediction)
+                    actuals.append(latest_price)
                     # Store prediction and actual price
                     predictions.append(prediction)
                     actuals.append(latest_price)
@@ -207,6 +232,11 @@ async def main():
                             list(predictions)[:-1], list(actuals)[1:])
                         logging.info(f"Current accuracy (last {len(predictions)-1} predictions): {accuracy:.2%}")
 
+                        # Conditional retraining based on accuracy
+                        if accuracy >= 0.8:  # If accuracy is 80% or more
+                            retrain_interval = 50  # Retrain more frequently
+                        else:
+                            retrain_interval = 100  # Default retrain interval
                         # Conditional retraining based on accuracy
                         if accuracy >= 0.8:  # If accuracy is 80% or more
                             retrain_interval = 50  # Retrain more frequently
@@ -242,4 +272,3 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-
