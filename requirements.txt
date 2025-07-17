@@ -2,3 +2,4 @@ websockets
 scikit-learn
 numpy
 pandas
+tensorflow

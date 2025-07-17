@@ -88,7 +88,7 @@ def preprocess_data(prices):
     X_train = np.array(X_train).reshape(-1, 65, 1)
     y_train = np.array(y_train)
     return X_train, y_train, scaler
-    return X_train, y_train, scaler
+    # return X_train, y_train, scaler
 
 
 def save_to_csv(data, filename='tick_data.csv'):
