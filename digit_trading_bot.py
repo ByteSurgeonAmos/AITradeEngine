@@ -13,7 +13,7 @@ from dataclasses import dataclass
 class DigitTradingConfig:
     """Configuration for digit trading bot"""
     # Trade Settings
-    stake: float = 500.0                    # Configurable stake amount
+    stake: float = 1.0                    # Configurable stake amount
     target_digit: int = 9                 # Digit to watch for (configurable)
     trade_digit: int = 8                  # Digit to trade when target appears
     contract_duration: int = 5            # Number of ticks for contract
@@ -22,17 +22,34 @@ class DigitTradingConfig:
     # Risk Management
     max_trades_per_hour: int = 130         # Maximum trades per hour
     max_open_contracts: int = 2           # Maximum simultaneous contracts
-    daily_profit_target: float = 1000.0   # Stop when target is reached
-    daily_loss_limit: float = 500.0       # Stop loss limit
+    daily_profit_target: float = 1.0   # Stop when target is reached
+    daily_loss_limit: float = 1.0       # Stop loss limit
     
     # Trading Logic
     min_wait_seconds: int = 10            # Minimum wait between trades
     consecutive_target_required: int = 1   # How many consecutive target digits needed
     
+    # Account Settings
+    use_real_account: bool = True        # Set to True for real account
+    
     # Connection Settings
     websocket_timeout: int = 60
-    app_id: int = 85574
-    api_token: str = "lUih4ezjsQwFivN"
+    
+    @property
+    def app_id(self) -> int:
+        """Get appropriate app_id based on account type"""
+        if self.use_real_account:
+            return 99240  
+        else:
+            return 85574  # Demo account app_id
+    
+    @property
+    def api_token(self) -> str:
+        """Get appropriate API token based on account type"""
+        if self.use_real_account:
+            return ""
+        else:
+            return "lUih4ezjsQwFivN"
     
     @property
     def connection_url(self) -> str:
@@ -402,17 +419,20 @@ async def main():
     
     # Create configuration (easily customizable)
     config = DigitTradingConfig(
-        stake=100.0,          # Adjust stake amount
+        stake=5.0,          # Adjust stake amount
         target_digit=9,         # Digit to watch for
         trade_digit=8,          # Trade UNDER this digit
         contract_duration=1,    # Contract duration in ticks
-        daily_profit_target=45.0,
-        daily_loss_limit=100.0
+        daily_profit_target=2.0,
+        daily_loss_limit=1.0,
+        use_real_account=True  # Set to True for REAL ACCOUNT trading
     )
     
     # Display configuration
+    account_type = "🔴 REAL ACCOUNT" if config.use_real_account else "🟡 DEMO ACCOUNT"
     print("🎲 DIGIT TRADING BOT")
     print("=" * 50)
+    print(f"Account Type: {account_type}")
     print(f"Strategy: When last digit = {config.target_digit}, trade UNDER {config.trade_digit}")
     print(f"Symbol: {config.symbol}")
     print(f"Stake: ${config.stake}")
@@ -420,6 +440,14 @@ async def main():
     print(f"Daily Target: ${config.daily_profit_target}")
     print(f"Daily Limit: ${config.daily_loss_limit}")
     print("=" * 50)
+    
+    # Safety warning for real account
+    if config.use_real_account:
+        print("⚠️  WARNING: YOU ARE USING A REAL ACCOUNT!")
+        print("⚠️  REAL MONEY WILL BE AT RISK!")
+        print("⚠️  Make sure you have set appropriate stake amounts and limits!")
+        print("=" * 50)
+    
     print()
     
     # Create and run bot
